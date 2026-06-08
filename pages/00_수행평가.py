@@ -1,124 +1,99 @@
-# app.py
-
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
-import matplotlib.font_manager as fm
+import plotly.express as px
+from pathlib import Path
 
-# -----------------------------
-# 한글 폰트 설정
-# -----------------------------
-plt.rcParams['font.family'] = 'Malgun Gothic'
-plt.rcParams['axes.unicode_minus'] = False
+st.set_page_config(
+    page_title="서울 도시고속도로 혼잡도 분석",
+    layout="wide"
+)
 
-# -----------------------------
-# 데이터 불러오기
-# -----------------------------
-@st.cache_data
-def load_data():
-    df = pd.read_csv("seoul.csv", encoding='cp949')
+st.title("🚗 서울 도시고속도로 혼잡도 분석")
 
-    # 컬럼명 공백 제거
-    df.columns = df.columns.str.strip()
+# 프로젝트 전체에서 csv 자동 탐색
+csv_files = list(Path.cwd().rglob("*.csv"))
 
-    # 날짜 변환
-    df['날짜'] = pd.to_datetime(df['날짜'])
+if not csv_files:
+    st.error("CSV 파일을 찾을 수 없습니다.")
+    st.stop()
 
-    # 월/일/연도 추출
-    df['월'] = df['날짜'].dt.month
-    df['일'] = df['날짜'].dt.day
-    df['연도'] = df['날짜'].dt.year
+csv_path = csv_files[0]
 
-    return df
+df = pd.read_csv(csv_path)
 
-df = load_data()
+traffic = df[
+    (df["구분"] == "2025년 평균")
+    & (df["교통량"] == "교통량")
+].iloc[0]
 
-# -----------------------------
-# 제목
-# -----------------------------
-st.title("서울 특정 날짜 기온 변화 분석")
+speed = df[
+    (df["구분"] == "2025년 평균")
+    & (df["교통량"] == "속도")
+].iloc[0]
 
-st.markdown("""
-원하는 월과 일을 선택하면  
-해당 날짜의 연도별 최고/최저 기온 변화를 확인할 수 있습니다.
-""")
+roads = [
+    "내부순환로",
+    "강변북로",
+    "북부간선도로",
+    "올림픽대로",
+    "동부간선도로",
+    "분당수서로",
+    "경부고속도로",
+    "강남순환로"
+]
 
-# -----------------------------
-# 월 / 일 선택
-# -----------------------------
-col1, col2 = st.columns(2)
+result = pd.DataFrame({
+    "노선": roads,
+    "교통량": [float(traffic[r]) for r in roads],
+    "평균속도": [float(speed[r]) for r in roads]
+})
 
-with col1:
-    month = st.selectbox("월 선택", list(range(1, 13)))
+result["혼잡도"] = result["교통량"] / result["평균속도"]
 
-with col2:
-    day = st.selectbox("일 선택", list(range(1, 32)))
+result = result.sort_values(
+    "혼잡도",
+    ascending=False
+)
 
-# -----------------------------
-# 데이터 필터링
-# -----------------------------
-filtered = df[
-    (df['월'] == month) &
-    (df['일'] == day)
-].copy()
+st.subheader("노선별 혼잡도")
 
-# 결측치 제거
-filtered = filtered.dropna(subset=['최고기온(℃)', '최저기온(℃)'])
+st.dataframe(
+    result,
+    use_container_width=True
+)
 
-# -----------------------------
-# 그래프
-# -----------------------------
-if len(filtered) > 0:
+fig = px.bar(
+    result,
+    x="노선",
+    y="혼잡도",
+    color="혼잡도",
+    text_auto=".0f"
+)
 
-    fig, ax = plt.subplots(figsize=(14, 6))
+fig.update_layout(height=600)
 
-    # 배경색
-    fig.patch.set_facecolor('#f2f2f2')
-    ax.set_facecolor('#f2f2f2')
+st.plotly_chart(
+    fig,
+    use_container_width=True
+)
 
-    # 최고기온
-    ax.plot(
-        filtered['연도'],
-        filtered['최고기온(℃)'],
-        color='hotpink',
-        linewidth=2.5,
-        label='최고기온'
-    )
+worst = result.iloc[0]
 
-    # 최저기온
-    ax.plot(
-        filtered['연도'],
-        filtered['최저기온(℃)'],
-        color='#87CEFA',
-        linewidth=2.5,
-        label='최저기온'
-    )
+st.error(
+    f"""
+가장 혼잡한 노선
 
-    # 제목
-    ax.set_title(
-        f"{month}월 {day}일 연도별 기온 변화",
-        fontsize=18,
-        fontweight='bold'
-    )
+🚗 {worst['노선']}
 
-    # 축 이름
-    ax.set_xlabel("연도", fontsize=13)
-    ax.set_ylabel("기온(℃)", fontsize=13)
+교통량 : {worst['교통량']:,.0f} 대/일
 
-    # 격자
-    ax.grid(alpha=0.3)
+평균속도 : {worst['평균속도']:.1f} km/h
 
-    # 범례
-    ax.legend(fontsize=12)
+혼잡도 지수 : {worst['혼잡도']:.0f}
+"""
+)
 
-    st.pyplot(fig)
-
-    # 데이터 보기
-    with st.expander("데이터 보기"):
-        st.dataframe(
-            filtered[['연도', '최고기온(℃)', '최저기온(℃)']]
-            .reset_index(drop=True)
-        )
-
-else:
-    st.warning("선택한 날짜의 데이터가 없습니다.")
+st.info(
+    "현재 파일에는 요일별·시간대별 데이터가 없어 "
+    "가장 혼잡한 요일과 시간대는 분석할 수 없습니다."
+)
